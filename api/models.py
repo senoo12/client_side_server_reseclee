@@ -1,8 +1,19 @@
 import qrcode
+import datetime
 from io import BytesIO
 from django.core.files import File
 from django.db import models
+from django.utils import timezone
 from django.contrib.auth.models import User
+
+class PasswordOTPReset(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    otp = models.CharField(max_length=6)
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def is_expired(self):
+        return timezone.now() > self.created_at + datetime.timedelta(minutes=10)
 
 class Gender(models.TextChoices):
     pria = 'pria', 'PRIA'
@@ -11,15 +22,20 @@ class Gender(models.TextChoices):
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     gender = models.CharField(max_length=10, choices=Gender.choices)
-    phone_number = models.CharField(max_length=20)
-    profile_picture = models.ImageField(upload_to='media/profile/%Y/%m/%d/', blank=True, null=True)
+    full_name = models.CharField(max_length=100)
+    bio = models.CharField(max_length=200)
+    profile_picture = models.ImageField(upload_to='profile/%Y/%m/%d/', blank=True, null=True)
 
     def __str__(self):
         return self.user.username
 
+    @property
+    def full_name(self):
+        return f"{self.user.first_name} {self.user.last_name}".strip()
+
 class Merk(models.Model):
     nama_merk = models.CharField(max_length=255)
-    img_merk = models.ImageField(upload_to='media/profile/%Y/%m/%d/', blank=True, null=True)
+    img_merk = models.ImageField(upload_to='merk/%Y/%m/%d/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -29,19 +45,18 @@ class Merk(models.Model):
 class Seri(models.Model):
     judul_seri = models.CharField(max_length=255, blank=True)
     nama_seri = models.CharField(max_length=255)
-    tahun_seri = models.IntegerField()
     merk = models.ForeignKey(Merk, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
-        self.judul_seri = f"{self.merk.nama_merk} - {self.nama_seri + " " + str(self.tahun_seri)}"
+        self.judul_seri = f"{self.merk.nama_merk} - {self.nama_seri}"
         super().save(*args, **kwargs)
-    
+
     def __str__(self):
         return self.judul_seri
 
-    
+
 class KodeKomponen(models.TextChoices):
     baterai = 'baterai', 'BATERAI'
     casing = 'casing', 'CASING'
@@ -62,9 +77,9 @@ class JenisBahan(models.Model):
 
     def __str__(self):
         return f"{self.nama_bahan} – {self.kode_komponen.upper()}"
-        
 
-class Baterai(models.Model):
+
+class BateraiLaptop(models.Model):
     judul_baterai = models.CharField(max_length=255, blank=True)
     seri_baterai = models.CharField(max_length=255)
     merk = models.ForeignKey(Merk, on_delete=models.CASCADE)
@@ -110,7 +125,7 @@ class Layar(models.Model):
         eco_status = "Eco-Friendly" if self.jenis_bahan.status_eco_friendly else "Not Eco-Friendly"
         self.judul_layar = f"Layar {self.merk.nama_merk} – {self.seri_layar} – {eco_status}"
         super().save(*args, **kwargs)
-    
+
     def __str__(self):
         return self.judul_layar
 
@@ -222,7 +237,7 @@ class Penyimpanan(models.Model):
     judul_penyimpanan = models.CharField(max_length=255, blank=True)
     seri_penyimpan = models.CharField(max_length=255)
     kapasitas_penyimpanan = models.IntegerField()
-    kecepatan_baca_tulis = models.CharField(max_length=255)
+    kecepatan_baca_tulis = models.DecimalField( max_digits=6, decimal_places=1)
     form_factor = models.DecimalField(max_digits=5, decimal_places=2)
     jenis_penyimpanan = models.CharField(max_length=6, choices=JenisPenyimpanan.choices)
     merk = models.ForeignKey(Merk, on_delete=models.CASCADE)
@@ -293,12 +308,12 @@ class Charger(models.Model):
 
 class Laptop(models.Model):
     judul_laptop = models.CharField(max_length=255, blank=True)
+    description = models.CharField(max_length=255, blank=True)
     seri = models.ForeignKey(Seri, on_delete=models.CASCADE)
-    upload_foto = models.ImageField(upload_to='media/laptop/%Y/%m/%d/')  
+    tahun_seri = models.IntegerField()
+    upload_foto = models.ImageField(upload_to='laptop/%Y/%m/%d/')
     jenis_warna = models.CharField(max_length=100)
-    ukuran = models.IntegerField()
-    kapasitas = models.IntegerField()
-    baterai = models.ForeignKey(Baterai, on_delete=models.CASCADE)
+    baterai = models.ForeignKey(BateraiLaptop, on_delete=models.CASCADE)
     prosesor = models.ForeignKey(Prosesor, on_delete=models.CASCADE)
     casing = models.ForeignKey(Casing, on_delete=models.CASCADE)
     penyimpanan = models.ForeignKey(Penyimpanan, on_delete=models.CASCADE)
@@ -308,12 +323,12 @@ class Laptop(models.Model):
     layar = models.ForeignKey(Layar, on_delete=models.CASCADE)
     ram = models.ForeignKey(RAM, on_delete=models.CASCADE)
     status_eco_friendly = models.BooleanField(blank=True)
-    qr_code_laptop = models.ImageField(upload_to='media/barcode_produk/%Y/%m/%d/', blank=True)
+    qr_code_laptop = models.ImageField(upload_to='barcode_produk/%Y/%m/%d/', blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def generate_qr_code(self):
-        url = f"http://localhost:8000/api/laptop/{self.id}/"
+        url = f"https://seno11.pythonanywhere.com/api/laptop/{self.id}/"
 
         qr_img = qrcode.make(url)
 
@@ -339,12 +354,15 @@ class Laptop(models.Model):
         jumlah_eco = sum(1 for bahan in komponen if bahan.status_eco_friendly)
         jumlah_non_eco = len(komponen) - jumlah_eco
 
-        self.judul_laptop = f"Laptop {self.seri.judul_seri} – {self.seri.nama_seri} – {self.jenis_warna} - {str(self.ukuran) + "inch"} - {str(self.kapasitas) + "hz"} - {self.status_eco_friendly}"
+        self.judul_laptop = (
+            f"Laptop {self.seri.judul_seri} – {self.tahun_seri} - {self.jenis_warna}"
+        )
+
         self.status_eco_friendly = jumlah_eco > jumlah_non_eco
 
         if not self.id:
             super().save(*args, **kwargs)
-        
+
         self.generate_qr_code()
 
         super().save(*args, **kwargs)
@@ -362,6 +380,6 @@ class Komentar(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.isi_komentar[:30]}"
-    
+
     class Meta:
         ordering = ['created_at']

@@ -1,7 +1,12 @@
+import random
+from datetime import datetime
 from django.contrib.auth.models import User, Group
+from django.contrib.auth.hashers import make_password
 from django.shortcuts import render
+from rest_framework.decorators import action
 from rest_framework import status
-from rest_framework.views import APIView 
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from django.utils.encoding import force_bytes, force_str
@@ -11,6 +16,7 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from rest_framework import viewsets, permissions
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from django_filters.rest_framework import DjangoFilterBackend
 from django.urls import reverse
 from .models import *
 from .serializers import *
@@ -40,66 +46,139 @@ class ChangePasswordView(APIView):
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# @method_decorator(csrf_exempt, name='dispatch')
+# class PasswordResetRequestView(APIView):
+#     permission_classes = [permissions.AllowAny]
+
+#     def post(self, request):  # <- Perhatikan tidak ada spasi ekstra di sini
+#         email = request.data.get("email")
+#         if not email:
+#             return Response({"error": "Email wajib diisi"}, status=400)
+
+#         try:
+#             user = User.objects.get(email=email)
+#         except User.DoesNotExist:
+#             return Response({"error": "Email tidak ditemukan"}, status=404)
+
+#         uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
+#         token = PasswordResetTokenGenerator().make_token(user)
+
+#         reset_link = f"reseecle://reset-password-confirm/{uidb64}/{token}/"
+
+#         send_mail(
+#             subject="Reset Password Anda",
+#             message=f"Klik link ini untuk reset password Anda: {reset_link}",
+#             from_email="serverreseecle@gmail.com",
+#             recipient_list=[email],
+#         )
+
+#         return Response({"message": "Link reset password berhasil dikirim ke email."})
+
+# class PasswordResetConfirmView(APIView):
+#     def post(self, request, uidb64, token):
+#         serializer = SetNewPasswordSerializers(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+
+#         try:
+#             uid = force_str(urlsafe_base64_decode(uidb64))
+#             user = User.objects.get(pk=uid)
+#         except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+#             return Response({"error": "Token tidak valid"}, status=status.HTTP_400_BAD_REQUEST)
+
+#         token_generator = PasswordResetTokenGenerator()
+#         if not token_generator.check_token(user, token):
+#             return Response({"error": "Token tidak valid atau sudah expired"}, status=status.HTTP_400_BAD_REQUEST)
+
+#         password = serializer.validated_data['password']
+#         user.set_password(password)
+#         user.save()
+
+#         return Response({"message": "Password berhasil direset."})
+
 @method_decorator(csrf_exempt, name='dispatch')
-class PasswordResetRequestView(APIView):
+class PasswordResetRequestOTPView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        print("Masuk ke passwordresetRequestView")
-        serializer = PasswordResetRequestSerializers(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        email = serializer.validated_data['email']
+        email = request.data.get("email")
+        if not email:
+            return Response({"error": "Email wajib diisi"}, status=400)
+
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
-            return Response({"error": "Email tidak ditemukan"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Email tidak ditemukan"}, status=404)
 
-        token_generator = PasswordResetTokenGenerator()
-        token = token_generator.make_token(user)
-        uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
+        otp = f"{random.randint(100000, 999999)}"
 
-        # URL verifikasi reset password
-        reset_url = request.build_absolute_uri(
-            reverse('password-reset-confirm', kwargs={'uidb64': uidb64, 'token': token})
+        # Simpan OTP di DB
+        PasswordOTPReset.objects.create(user=user, otp=otp)
+
+        send_mail(
+            subject="Kode OTP Reset Password",
+            message=f"Kode OTP Anda: {otp}\nBerlaku selama 5 menit.",
+            from_email="serverreseecle@gmail.com",
+            recipient_list=[email],
         )
 
-        subject = "Permintaan Reset Password"
-        message = f"Klik link ini untuk reset password Anda: {reset_url}"
-        from_email = 'yourgmail@gmail.com'
-        recipient_list = [email]
+        return Response({"message": "Kode OTP sudah dikirim ke email."})
 
-        send_mail(subject, message, from_email, recipient_list)
+class PasswordResetConfirmOTPView(APIView):
+    def post(self, request):
+        otp = request.data.get('otp')
 
-        return Response({"message": "Link reset password sudah dikirim ke email Anda."})
-
-class PasswordResetConfirmView(APIView):
-    def post(self, request, uidb64, token):
-        serializer = SetNewPasswordSerializers(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not otp:
+            return Response({"error": "OTP wajib diisi"}, status=400)
 
         try:
-            uid = force_str(urlsafe_base64_decode(uidb64))
-            user = User.objects.get(pk=uid)
-        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
-            return Response({"error": "Token tidak valid"}, status=status.HTTP_400_BAD_REQUEST)
+            otp_obj = PasswordOTPReset.objects.get(otp=otp, is_used=False)
+        except PasswordOTPReset.DoesNotExist:
+            return Response({"error": "OTP tidak valid atau sudah digunakan"}, status=400)
 
-        token_generator = PasswordResetTokenGenerator()
-        if not token_generator.check_token(user, token):
-            return Response({"error": "Token tidak valid atau sudah expired"}, status=status.HTTP_400_BAD_REQUEST)
+        if otp_obj.is_expired():
+            return Response({"error": "OTP kadaluarsa"}, status=400)
 
-        password = serializer.validated_data['password']
-        user.set_password(password)
+        # Simpan status validasi berhasil (opsional)
+        return Response({"message": "OTP valid", "email": otp_obj.user.email}, status=200)
+
+class SetNewPasswordView(APIView):
+    def post(self, request):
+        otp = request.data.get('otp')
+        password = request.data.get('password')
+
+        if not otp or not password:
+            return Response({"error": "OTP dan password wajib diisi"}, status=400)
+
+        try:
+            otp_obj = PasswordOTPReset.objects.get(otp=otp, is_used=False)
+        except PasswordOTPReset.DoesNotExist:
+            return Response({"error": "OTP tidak valid"}, status=400)
+
+        if otp_obj.is_expired():
+            return Response({"error": "OTP kadaluarsa"}, status=400)
+
+        try:
+            user = otp_obj.user
+        except User.DoesNotExist:
+            return Response({"error": "User tidak ditemukan"}, status=404)
+
+        user.password = make_password(password)
         user.save()
 
-        return Response({"message": "Password berhasil direset."})
+        otp_obj.is_used = True
+        otp_obj.save()
+
+        return Response({"message": "Password berhasil diubah"}, status=200)
+
 
 class ProfileViewSet(viewsets.ModelViewSet):
     serializer_class = ProfileSerializers
     permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
 
     def get_queryset(self):
         return Profile.objects.filter(user=self.request.user)
-    
+
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
@@ -126,9 +205,9 @@ class JenisBahanViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ['get']
 
-class BateraiViewSet(viewsets.ModelViewSet):
-    queryset = Baterai.objects.all()
-    serializer_class = BateraiSerializers
+class BateraiLaptopViewSet(viewsets.ModelViewSet):
+    queryset = BateraiLaptop.objects.all()
+    serializer_class = BateraiLaptopSerializers
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ['get']
 
@@ -184,10 +263,37 @@ class LaptopViewSet(viewsets.ModelViewSet):
     queryset = Laptop.objects.all()
     serializer_class = LaptopSerializers
     permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = {
+        'seri__merk': ['exact'],
+    }
     http_method_names = ['get']
 
+    @action(detail=False, methods=['get'], url_path='hijau_bulan_ini')
+    def hijau_bulan_ini(self, request):
+        bulan_ini = datetime.datetime.now().month
+        tahun_ini = datetime.datetime.now().year
+        queryset = Laptop.objects.filter(
+            status_eco_friendly=True,
+            created_at__month=bulan_ini,
+            created_at__year=tahun_ini
+        ).order_by('-created_at')[:1]
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
 class KomentarViewSet(viewsets.ModelViewSet):
-    queryset = Komentar.objects.all()
-    serializer_class = KomentarSerializers
     permission_classes = [permissions.IsAuthenticated]
-    http_method_names = ['get']
+    queryset = Komentar.objects.all()
+    http_method_names = ['get', 'post']
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = {'laptop': ['exact']}
+
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return KomentarCreateSerializer
+        return KomentarReadSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)

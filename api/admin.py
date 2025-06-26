@@ -5,12 +5,12 @@ from import_export.admin import ImportExportModelAdmin
 
 # Register your models here.
 class ProfileUserAdmin(admin.ModelAdmin):
-    list_display = ['id', 'user', 'gender', 'phone_number', 'profile_picture']
-    
+    list_display = ['id', 'user', 'gender', 'bio', 'profile_picture']
+
 admin.site.register(Profile, ProfileUserAdmin)
 
 class SeriAdmin(ImportExportModelAdmin, admin.ModelAdmin):
-    list_display = ['id', 'judul_seri', 'nama_seri', 'tahun_seri', 'merk']
+    list_display = ['id', 'judul_seri', 'nama_seri', 'merk']
     readonly_fields = ['judul_seri']
 
 admin.site.register(Seri, SeriAdmin)
@@ -22,15 +22,14 @@ admin.site.register(Merk, MerkAdmin)
 
 class JenisBahanAdmin(ImportExportModelAdmin, admin.ModelAdmin):
     list_display = ['id', 'nama_bahan', 'kode_komponen', 'status_eco_friendly']
-    readonly_fields = ['status_eco_friendly']
 
 admin.site.register(JenisBahan, JenisBahanAdmin)
 
-class BateraiAdmin(ImportExportModelAdmin, admin.ModelAdmin):
+class BateraiLaptopAdmin(ImportExportModelAdmin, admin.ModelAdmin):
     list_display = ['id', 'judul_baterai', 'seri_baterai', 'merk', 'kapasitas', 'voltage', 'jenis_bahan']
     readonly_fields = ['judul_baterai']
 
-admin.site.register(Baterai, BateraiAdmin)
+admin.site.register(BateraiLaptop, BateraiLaptopAdmin)
 
 class LayarAdmin(ImportExportModelAdmin, admin.ModelAdmin):
     list_display = ['id', 'judul_layar', 'seri_layar', 'merk', 'panjang_layar', 'lebar_layar', 'resolusi', 'refresh_rate', 'jenis_bahan']
@@ -81,8 +80,8 @@ class ChargerAdmin(ImportExportModelAdmin, admin.ModelAdmin):
 admin.site.register(Charger, ChargerAdmin)
 
 class LaptopAdmin(ImportExportModelAdmin, admin.ModelAdmin):
-    list_display = ['id', 'judul_laptop', 'jenis_warna', 'ukuran', 'kapasitas', 'status_eco_friendly', 'qr_preview']
-    readonly_fields = ['qr_preview']
+    list_display = ['id', 'judul_laptop', 'jenis_warna', 'tahun_seri', 'status_eco_friendly', 'qr_preview']
+    readonly_fields = ['judul_laptop', 'status_eco_friendly', 'qr_code_laptop', 'qr_preview']
 
     def qr_preview(self, obj):
         if obj.qr_code_laptop:
@@ -92,7 +91,7 @@ class LaptopAdmin(ImportExportModelAdmin, admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)   # Simpan dulu agar dapat ID
         obj.generate_qr_code()                           # Generate QR setelah disimpan
-        obj.save(update_fields=['qr_code_laptop'])  
+        obj.save(update_fields=['qr_code_laptop'])
 
 admin.site.register(Laptop, LaptopAdmin)
 
